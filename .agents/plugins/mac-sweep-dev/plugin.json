@@ -1,0 +1,11 @@
+{
+  "name": "mac-sweep-dev",
+  "displayName": "Mac Sweep Dev Kit",
+  "version": "0.1.0",
+  "description": "Domain skills, specialist subagents, and APFS/Tauri engineering rules for developing mac-sweep.",
+  "suggestedPrompts": [
+    "Audit the APFS scanner against firmlink, sparse-file, and hard-link invariants",
+    "Add a new developer artifact preset across the Rust detector and React UI",
+    "Run the full mac-sweep verification suite (Rust, TypeScript, and 50k-node Canvas budget)"
+  ]
+}

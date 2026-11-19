@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+
+  --font-mac-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mac-mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+
+  --mac-accent-light: #0066dc;
+  --mac-accent-dark: #2e8bff;
+  --mac-accent: var(--mac-accent-light);
+
+  --mac-focus-ring-light: #0066dc;
+  --mac-focus-ring-dark: #58a6ff;
+  --mac-focus-ring: var(--mac-focus-ring-light);
+
+  /* High-contrast (>= 3:1) scrollbar tokens for both light & dark macOS surfaces */
+  --scrollbar-thumb-light: #7c828d;
+  --scrollbar-thumb-dark: #7d8590;
+  --scrollbar-track-light: transparent;
+  --scrollbar-track-dark: transparent;
+  --scrollbar-thumb: var(--scrollbar-thumb-light);
+  --scrollbar-track: var(--scrollbar-track-light);
+
+  @media (prefers-color-scheme: dark) {
+    --mac-accent: var(--mac-accent-dark);
+    --mac-focus-ring: var(--mac-focus-ring-dark);
+    --scrollbar-thumb: var(--scrollbar-thumb-dark);
+    --scrollbar-track: var(--scrollbar-track-dark);
+  }
+
+  @supports (color: light-dark(white, black)) {
+    --mac-accent: light-dark(var(--mac-accent-light), var(--mac-accent-dark));
+    --mac-focus-ring: light-dark(
+      var(--mac-focus-ring-light),
+      var(--mac-focus-ring-dark)
+    );
+    --scrollbar-thumb: light-dark(
+      var(--scrollbar-thumb-light),
+      var(--scrollbar-thumb-dark)
+    );
+    --scrollbar-track: light-dark(
+      var(--scrollbar-track-light),
+      var(--scrollbar-track-dark)
+    );
+  }
+
+  accent-color: var(--mac-accent);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--font-mac-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mac-mono {
+  font-family: var(--font-mac-mono);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native macOS subtle scrollbars with modern standard + WebKit fallback */
+.mac-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  .mac-scroll {
+    scrollbar-width: auto;
+  }
+
+  .mac-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .mac-scroll::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .mac-scroll::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+}
+
+/* Accessible high-contrast focus indicator for keyboard navigation */
+:where(button, a, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--mac-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Native <dialog> scroll containment & macOS frosted backdrop */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(10, 12, 16, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+dialog.mac-dialog {
+  margin: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: visible;
+}
+
+dialog.mac-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
