@@ -6,6 +6,15 @@ use crate::ipc::types::{
     key_to_node_id, AppError, DeleteFailure, DeleteMode, DeleteRequest, DeleteResult, NodeKey,
 };
 
+/// macOS `<sys/stat.h>` flag (`SF_DATALESS`) indicating a cloud placeholder
+/// file or directory whose data blocks are not materialized locally.
+#[cfg(target_os = "macos")]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+/// Maximum directory entries inspected when checking a failed trash target
+/// for iCloud dataless (`SF_DATALESS`) or `.icloud` placeholder files.
+const MAX_DATALESS_PROBE_ENTRIES: usize = 2_048;
+
 const SYSTEM_PROTECTED_PATHS: &[&str] = &[
     "/",
     "/System",
@@ -130,7 +139,7 @@ impl ProtectedPathGuard {
 ///
 /// - Deduplicates descendant nodes when an ancestor is also requested.
 /// - Validates every target through `ProtectedPathGuard` before touching the filesystem.
-/// - Defaults to Finder Trash (`trash::delete`) for `DeleteMode::Trash`.
+/// - Defaults to Finder Trash (`NSFileManager.trashItemAtURL` on macOS) for `DeleteMode::Trash`.
 /// - Never follows symlinks during `DeleteMode::Permanent`.
 /// - Immediately updates `ArenaTree` via `remove_subtree` after each successful deletion.
 pub fn delete_nodes(
@@ -206,9 +215,7 @@ pub fn delete_nodes(
         }
 
         let delete_outcome = match request.mode {
-            DeleteMode::Trash => {
-                trash::delete(&path).map_err(|e| AppError::TrashFailed(e.to_string()))
-            }
+            DeleteMode::Trash => move_to_trash(&path),
             DeleteMode::Permanent => remove_permanently_no_follow(&path),
         };
 
@@ -329,5 +336,200 @@ fn normalize_lexical(path: &Path) -> PathBuf {
         PathBuf::from("/")
     } else {
         out
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_trash_context() -> trash::TrashContext {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::new();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx
+}
+
+fn move_to_trash(path: &Path) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    let result = macos_trash_context().delete(path);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = trash::delete(path);
+
+    result.map_err(|err| format_trash_error(path, &err))
+}
+
+fn extract_trash_error_detail(err: &trash::Error) -> String {
+    match err {
+        trash::Error::Unknown { description } | trash::Error::Os { description, .. } => {
+            let trimmed = description.trim();
+            if trimmed.is_empty() {
+                err.to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        _ => err.to_string(),
+    }
+}
+
+fn is_icloud_download_required_message(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    [
+        "needs to be downloaded",
+        "need to be downloaded",
+        "isn't downloaded",
+        "isn’t downloaded",
+        "not downloaded",
+        "-8013",
+        "nsubiquitousfileunavailableerror",
+        "cocoa error 4355",
+        "code=4355",
+        "code: 4355",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn is_icloud_stub_file_name(name: &std::ffi::OsStr) -> bool {
+    let s = name.to_string_lossy();
+    s.len() > ".icloud".len() && s.starts_with('.') && s.ends_with(".icloud")
+}
+
+#[cfg(target_os = "macos")]
+fn is_dataless_metadata(meta: &std::fs::Metadata) -> bool {
+    use std::os::macos::fs::MetadataExt as MacosMetadataExt;
+    (meta.st_flags() & SF_DATALESS) != 0
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_dataless_metadata(_meta: &std::fs::Metadata) -> bool {
+    false
+}
+
+fn path_contains_dataless_or_icloud_stub(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if path.file_name().is_some_and(is_icloud_stub_file_name) || is_dataless_metadata(&meta) {
+        return true;
+    }
+
+    if !meta.file_type().is_dir() || meta.file_type().is_symlink() {
+        return false;
+    }
+
+    let mut stack = vec![path.to_path_buf()];
+    let mut inspected: usize = 0;
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            inspected += 1;
+            if inspected > MAX_DATALESS_PROBE_ENTRIES {
+                return false;
+            }
+            if is_icloud_stub_file_name(&entry.file_name()) {
+                return true;
+            }
+            let entry_path = entry.path();
+            let Ok(child_meta) = std::fs::symlink_metadata(&entry_path) else {
+                continue;
+            };
+            if is_dataless_metadata(&child_meta) {
+                return true;
+            }
+            let ft = child_meta.file_type();
+            if ft.is_dir() && !ft.is_symlink() {
+                stack.push(entry_path);
+            }
+        }
+    }
+
+    false
+}
+
+fn format_trash_error(path: &Path, err: &trash::Error) -> AppError {
+    let detail = extract_trash_error_detail(err);
+    if is_icloud_download_required_message(&detail) || path_contains_dataless_or_icloud_stub(path) {
+        let item_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        return AppError::TrashFailed(format!(
+            "\"{item_name}\" contains iCloud Drive items that are not downloaded locally. Download it in Finder first, or choose \"Delete permanently (bypass Finder Trash)\" to remove it directly without downloading."
+        ));
+    }
+    AppError::TrashFailed(detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_trash_context_uses_ns_file_manager_delete_method() {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        assert!(matches!(
+            macos_trash_context().delete_method(),
+            DeleteMethod::NsFileManager
+        ));
+    }
+
+    #[test]
+    fn formats_finder_8013_and_cocoa_4355_errors_with_actionable_icloud_guidance() {
+        let target = Path::new("/Users/test/Documents/PitchMate/node_modules");
+
+        let finder_err = trash::Error::Os {
+            code: 1,
+            description: "The AppleScript exited with error. stderr: 29:154: execution error: Finder got an error: The operation can’t be completed because the item needs to be downloaded. (-8013)\n".to_string(),
+        };
+        let formatted_finder = format_trash_error(target, &finder_err);
+        match &formatted_finder {
+            AppError::TrashFailed(msg) => {
+                assert!(msg.contains("node_modules"));
+                assert!(msg.contains("iCloud Drive"));
+                assert!(msg.contains("Delete permanently (bypass Finder Trash)"));
+                assert!(!msg.contains("Os { code: 1"));
+            }
+            other => panic!("expected AppError::TrashFailed, got {other:?}"),
+        }
+
+        let cocoa_err = trash::Error::Unknown {
+            description: "While deleting 'node_modules', `trashItemAtURL` failed: Error Domain=NSCocoaErrorDomain Code=4355 \"The file couldn’t be opened because it isn’t in the correct format.\"".to_string(),
+        };
+        let formatted_cocoa = format_trash_error(target, &cocoa_err);
+        match &formatted_cocoa {
+            AppError::TrashFailed(msg) => {
+                assert!(msg.contains("iCloud Drive"));
+                assert!(msg.contains("Delete permanently (bypass Finder Trash)"));
+            }
+            other => panic!("expected AppError::TrashFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detects_icloud_placeholder_stubs_inside_directory_on_trash_failure() {
+        let dir = TempDir::new().expect("create temp dir");
+        let nm = dir.path().join("node_modules");
+        let nested = nm.join("pkg");
+        fs::create_dir_all(&nested).expect("create nested dirs");
+        fs::write(nested.join(".package.json.icloud"), b"stub").expect("write .icloud stub");
+
+        let err = trash::Error::Unknown {
+            description: "trashItemAtURL failed".to_string(),
+        };
+        let formatted = format_trash_error(&nm, &err);
+        match &formatted {
+            AppError::TrashFailed(msg) => {
+                assert!(msg.contains("node_modules"));
+                assert!(msg.contains("iCloud Drive"));
+                assert!(msg.contains("Delete permanently (bypass Finder Trash)"));
+            }
+            other => panic!("expected AppError::TrashFailed, got {other:?}"),
+        }
     }
 }

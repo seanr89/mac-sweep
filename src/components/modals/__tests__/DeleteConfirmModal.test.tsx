@@ -202,5 +202,76 @@ describe("DeleteConfirmModal", () => {
     expect(
       screen.getByText(/Refusing to modify protected path: \/System/i),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Switch to Permanent Delete/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a Switch to Permanent Delete action when TRASH_FAILED occurs while still requiring explicit acknowledgment", () => {
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+
+    const icloudTarget: NodeSummaryDto = {
+      ...SAMPLE_TARGETS[0]!,
+      id: "9007199254741999",
+      name: "node_modules",
+      path: "/Users/alex/Documents/PitchMate/node_modules",
+    };
+
+    const trashFailureResult: DeleteResult = {
+      deletedNodeIds: [],
+      reclaimedPhysicalBytes: 0,
+      reclaimedLogicalBytes: 0,
+      failures: [
+        {
+          nodeId: icloudTarget.id,
+          path: icloudTarget.path,
+          code: "TRASH_FAILED",
+          reason:
+            '"node_modules" contains iCloud Drive items that are not downloaded locally. Download it in Finder first, or choose "Delete permanently (bypass Finder Trash)" to remove it directly without downloading.',
+        },
+      ],
+      updatedRoot: null,
+    };
+
+    render(
+      <DeleteConfirmModal
+        open
+        targets={[icloudTarget]}
+        lastResult={trashFailureResult}
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText("TRASH_FAILED")).toBeInTheDocument();
+    expect(
+      screen.getByText(/contains iCloud Drive items that are not downloaded/i),
+    ).toBeInTheDocument();
+
+    const switchButton = screen.getByRole("button", {
+      name: /Switch to Permanent Delete/i,
+    });
+    fireEvent.click(switchButton);
+
+    // Switched into permanent mode, but explicit acknowledgment is STILL required
+    const deleteButton = screen.getByRole("button", {
+      name: /^Delete Permanently$/i,
+    });
+    expect(deleteButton).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: /Switch to Permanent Delete/i }),
+    ).not.toBeInTheDocument();
+
+    const ackCheckbox = screen.getByLabelText(
+      /I understand these items cannot be recovered from Trash/i,
+    );
+    fireEvent.click(ackCheckbox);
+
+    expect(deleteButton).toBeEnabled();
+    fireEvent.click(deleteButton);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith("permanent");
   });
 });

@@ -79,6 +79,9 @@ export function DeleteConfirmModal({
 
   const isPermanent = mode === "permanent";
   const hasFailures = Boolean(lastResult && lastResult.failures.length > 0);
+  const hasTrashFailure = Boolean(
+    lastResult?.failures.some((failure) => failure.code === "TRASH_FAILED"),
+  );
   const confirmDisabled =
     isDeleting ||
     targets.length === 0 ||
@@ -243,6 +246,22 @@ export function DeleteConfirmModal({
                   </li>
                 ))}
               </ul>
+              {hasTrashFailure && !isPermanent && (
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-amber-500/25 pt-2">
+                  <span className="text-[11px] opacity-90">
+                    Items that cannot be moved to Finder Trash (such as evicted
+                    iCloud Drive folders) can be deleted permanently instead.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={() => handlePermanentToggle(true)}
+                    className="shrink-0 rounded-md border border-amber-600/35 bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-950 transition-colors hover:bg-amber-500/25 disabled:opacity-50 dark:border-amber-400/35 dark:bg-amber-400/15 dark:text-amber-100 dark:hover:bg-amber-400/25"
+                  >
+                    Switch to Permanent Delete
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
