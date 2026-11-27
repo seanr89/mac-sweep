@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import {
   AlertCircle,
   CheckCircle2,
@@ -12,6 +13,7 @@ import { useCallback, useEffect, useId, useMemo } from "react";
 import { FdaBanner } from "./components/layout/FdaBanner";
 import { ScanProgressBar } from "./components/layout/ScanProgressBar";
 import { TitleBar } from "./components/layout/TitleBar";
+import { AboutModal } from "./components/modals/AboutModal";
 import { DeleteConfirmModal } from "./components/modals/DeleteConfirmModal";
 import { DevPresetsPanel } from "./components/presets/DevPresetsPanel";
 import { VirtualizedDirectoryTree } from "./components/tree/VirtualizedDirectoryTree";
@@ -23,6 +25,7 @@ import {
   formatDurationMs,
   isArtifactDirectory,
 } from "./lib/format";
+import { isTauriRuntime } from "./lib/ipc/client";
 import type {
   ArtifactGroupDto,
   NodeKey,
@@ -135,6 +138,7 @@ export default function App() {
   const deleteModalOpen = useSweepStore((s) => s.deleteModalOpen);
   const isDeleting = useSweepStore((s) => s.isDeleting);
   const lastDeleteResult = useSweepStore((s) => s.lastDeleteResult);
+  const aboutModalOpen = useSweepStore((s) => s.aboutModalOpen);
   const toast = useSweepStore((s) => s.toast);
 
   const pickAndScan = useSweepStore((s) => s.pickAndScan);
@@ -148,6 +152,8 @@ export default function App() {
   const openDeleteModal = useSweepStore((s) => s.openDeleteModal);
   const closeDeleteModal = useSweepStore((s) => s.closeDeleteModal);
   const confirmDelete = useSweepStore((s) => s.confirmDelete);
+  const openAboutModal = useSweepStore((s) => s.openAboutModal);
+  const closeAboutModal = useSweepStore((s) => s.closeAboutModal);
   const revealInFinder = useSweepStore((s) => s.revealInFinder);
   const dismissToast = useSweepStore((s) => s.dismissToast);
 
@@ -155,6 +161,31 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // Listen for native macOS "Mac Sweep -> About Mac Sweep" menu events
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let unlisten: (() => void) | undefined;
+    let active = true;
+
+    void listen("open-about-modal", () => {
+      openAboutModal();
+    }).then((fn) => {
+      if (active) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+
+    return () => {
+      active = false;
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [openAboutModal]);
 
   // Auto-dismiss transient toast notifications after 5.5s
   useEffect(() => {
@@ -262,7 +293,9 @@ export default function App() {
       }
 
       if (mod && event.key === "Backspace") {
-        if (isEditableTarget(event.target) || deleteModalOpen) return;
+        if (isEditableTarget(event.target) || deleteModalOpen || aboutModalOpen) {
+          return;
+        }
         if (selectedTargets.length > 0) {
           event.preventDefault();
           openDeleteModal(selectedTargets);
@@ -271,7 +304,9 @@ export default function App() {
       }
 
       if (event.key === "Escape") {
-        if (deleteModalOpen) {
+        if (aboutModalOpen) {
+          closeAboutModal();
+        } else if (deleteModalOpen) {
           closeDeleteModal();
         } else if (!isEditableTarget(event.target) && selectedNodeIds.size > 0) {
           clearSelection();
@@ -285,6 +320,8 @@ export default function App() {
     scanStatus,
     pickAndScan,
     setVizMode,
+    aboutModalOpen,
+    closeAboutModal,
     deleteModalOpen,
     selectedTargets,
     openDeleteModal,
@@ -575,6 +612,9 @@ export default function App() {
         onConfirm={(mode) => confirmDelete(mode)}
         onClose={closeDeleteModal}
       />
+
+      {/* About & In-App Changelog Modal */}
+      <AboutModal open={aboutModalOpen} onClose={closeAboutModal} />
     </div>
   );
 }

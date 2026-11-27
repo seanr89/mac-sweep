@@ -101,6 +101,8 @@ export interface SweepState {
   isDeleting: boolean;
   lastDeleteResult: DeleteResult | null;
 
+  aboutModalOpen: boolean;
+
   toast: ToastNotice | null;
 }
 
@@ -132,6 +134,9 @@ export interface SweepActions {
   openDeleteModal: (targets: NodeSummaryDto[]) => void;
   closeDeleteModal: () => void;
   confirmDelete: (mode: DeleteMode) => Promise<DeleteResult | null>;
+
+  openAboutModal: () => void;
+  closeAboutModal: () => void;
 
   revealInFinder: (nodeId: NodeKey) => Promise<void>;
   dismissToast: () => void;
@@ -175,6 +180,8 @@ function createInitialState(): SweepState {
     deleteModalOpen: false,
     isDeleting: false,
     lastDeleteResult: null,
+
+    aboutModalOpen: false,
 
     toast: null,
   };
@@ -841,6 +848,14 @@ export const useSweepStore = create<SweepStore>((set, get) => {
         });
         return null;
       }
+    },
+
+    openAboutModal: () => {
+      set({ aboutModalOpen: true });
+    },
+
+    closeAboutModal: () => {
+      set({ aboutModalOpen: false });
     },
 
     revealInFinder: async (nodeId: NodeKey) => {

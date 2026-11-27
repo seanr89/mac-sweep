@@ -7,18 +7,18 @@ pub mod scanner;
 
 use std::sync::Arc;
 
+use tauri::Emitter;
+
 use crate::ipc::commands::{self, AppState};
 
 #[cfg(target_os = "macos")]
 fn build_macos_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+
+    let about_item = MenuItemBuilder::with_id("about", "About Mac Sweep").build(app)?;
 
     let app_submenu = SubmenuBuilder::new(app, "Mac Sweep")
-        .item(&PredefinedMenuItem::about(
-            app,
-            Some("About Mac Sweep"),
-            None,
-        )?)
+        .item(&about_item)
         .separator()
         .item(&PredefinedMenuItem::services(app, None)?)
         .separator()
@@ -68,6 +68,11 @@ pub fn run() {
                 app.set_menu(menu)?;
             }
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == "about" {
+                let _ = app.emit("open-about-modal", ());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::check_full_disk_access,

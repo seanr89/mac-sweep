@@ -2,6 +2,7 @@ import {
   FolderSearch,
   HardDrive,
   Home,
+  Info,
   Loader2,
   XCircle,
 } from "lucide-react";
@@ -26,6 +27,7 @@ export function TitleBar() {
   const pickAndScan = useSweepStore((s) => s.pickAndScan);
   const scanDirectory = useSweepStore((s) => s.scanDirectory);
   const cancelScan = useSweepStore((s) => s.cancelScan);
+  const openAboutModal = useSweepStore((s) => s.openAboutModal);
 
   const isScanning = scanStatus === "scanning";
   const homePath = resolveHomePath(fdaStatus?.probedPath);
@@ -163,6 +165,17 @@ export function TitleBar() {
           </span>
         </div>
       )}
+
+      {/* About & Changelog Button */}
+      <button
+        type="button"
+        onClick={openAboutModal}
+        aria-label="About Mac Sweep"
+        title="About Mac Sweep"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-black/[0.09] bg-white/70 text-neutral-600 transition-colors hover:bg-black/[0.04] hover:text-neutral-900 dark:border-white/[0.1] dark:bg-white/[0.05] dark:text-neutral-300 dark:hover:bg-white/[0.1] dark:hover:text-neutral-100"
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
     </header>
   );
 }
