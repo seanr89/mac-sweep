@@ -1,14 +1,16 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowRight,
   Calendar,
+  ExternalLink,
   FileText,
-  HardDrive,
   Sparkles,
   Tag,
   X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import appIconUrl from "../../../src-tauri/icons/128x128.png";
 import {
   APP_FALLBACK_VERSION,
   BUNDLED_CHANGELOG_ENTRIES,
@@ -30,13 +32,32 @@ function normalizeVersionTag(version: string): string {
   return version.trim().replace(/^v/i, "");
 }
 
+function isSafeHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function openExternalUrl(url: string): void {
+  if (!isSafeHttpUrl(url)) return;
+  if (isTauriRuntime()) {
+    void openUrl(url).catch(() => {});
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 /**
- * Render simple inline markdown tokens (`**bold**` and `` `code` ``) into
- * React elements without `dangerouslySetInnerHTML`.
+ * Render simple inline markdown tokens (`**bold**`, `` `code` ``, and
+ * `[label](https://...)` links) into React elements without
+ * `dangerouslySetInnerHTML`.
  */
 function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let keyIdx = 0;
@@ -65,6 +86,35 @@ function renderInlineMarkdown(text: string): ReactNode[] {
           {token.slice(1, -1)}
         </code>,
       );
+    } else if (token.startsWith("[")) {
+      const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        const label = linkMatch[1] ?? "";
+        const url = (linkMatch[2] ?? "").trim();
+        if (isSafeHttpUrl(url)) {
+          nodes.push(
+            <a
+              key={`l-${keyIdx++}`}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(event) => {
+                if (isTauriRuntime()) {
+                  event.preventDefault();
+                  openExternalUrl(url);
+                }
+              }}
+              className="font-medium text-blue-600 underline decoration-blue-500/40 underline-offset-2 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              {label}
+            </a>,
+          );
+        } else {
+          nodes.push(label);
+        }
+      } else {
+        nodes.push(token);
+      }
     }
 
     lastIndex = match.index + token.length;
@@ -101,12 +151,34 @@ function ChangelogEntryCard({
               </span>
             )}
           </div>
-          {entry.date && (
-            <span className="inline-flex items-center gap-1 text-[11px] tabular-nums text-neutral-500 dark:text-neutral-400">
-              <Calendar className="h-3 w-3" aria-hidden="true" />
-              {entry.date}
-            </span>
-          )}
+          {entry.date || (entry.url && isSafeHttpUrl(entry.url)) ? (
+            <div className="flex items-center gap-2.5">
+              {entry.date && (
+                <span className="inline-flex items-center gap-1 text-[11px] tabular-nums text-neutral-500 dark:text-neutral-400">
+                  <Calendar className="h-3 w-3" aria-hidden="true" />
+                  {entry.date}
+                </span>
+              )}
+              {entry.url && isSafeHttpUrl(entry.url) && (
+                <a
+                  href={entry.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`View v${normalizeVersionTag(entry.version)} release notes`}
+                  onClick={(event) => {
+                    if (isTauriRuntime()) {
+                      event.preventDefault();
+                      openExternalUrl(entry.url!);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-neutral-500 transition-colors hover:bg-black/[0.06] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/[0.08] dark:hover:text-neutral-100"
+                >
+                  <span>GitHub</span>
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
+              )}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -152,6 +224,8 @@ export function AboutModal({
   entries,
 }: AboutModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const whatsNewTabRef = useRef<HTMLButtonElement>(null);
+  const changelogTabRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const whatsNewTabId = useId();
   const changelogTabId = useId();
@@ -235,9 +309,23 @@ export function AboutModal({
   };
 
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let nextTab: AboutTab | null = null;
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-      event.preventDefault();
-      setActiveTab(activeTab === "whats-new" ? "changelog" : "whats-new");
+      nextTab = activeTab === "whats-new" ? "changelog" : "whats-new";
+    } else if (event.key === "Home") {
+      nextTab = "whats-new";
+    } else if (event.key === "End") {
+      nextTab = "changelog";
+    }
+
+    if (!nextTab) return;
+
+    event.preventDefault();
+    setActiveTab(nextTab);
+    if (nextTab === "whats-new") {
+      whatsNewTabRef.current?.focus();
+    } else {
+      changelogTabRef.current?.focus();
     }
   };
 
@@ -251,18 +339,22 @@ export function AboutModal({
       aria-labelledby={titleId}
       onCancel={handleDialogCancel}
       onClose={handleDialogClose}
+      onClick={(event) => {
+        if (event.target === dialogRef.current) {
+          onClose();
+        }
+      }}
       className="mac-dialog"
     >
       <div className="flex max-h-[calc(100vh-48px)] w-[520px] max-w-full flex-col overflow-hidden rounded-2xl border border-black/[0.12] bg-white/95 text-neutral-900 shadow-2xl backdrop-blur-2xl dark:border-white/[0.14] dark:bg-neutral-900/95 dark:text-neutral-100">
         {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b border-black/[0.07] px-5 py-4 dark:border-white/[0.08]">
           <div className="flex items-center gap-3.5">
-            <div
-              aria-hidden="true"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm ring-1 ring-black/10 dark:ring-white/15"
-            >
-              <HardDrive className="h-6 w-6" aria-hidden="true" />
-            </div>
+            <img
+              src={appIconUrl}
+              alt=""
+              className="h-11 w-11 shrink-0 rounded-xl shadow-sm ring-1 ring-black/10 dark:ring-white/15"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <h2
@@ -300,6 +392,7 @@ export function AboutModal({
             className="grid grid-cols-2 rounded-lg bg-black/[0.06] p-0.5 dark:bg-white/[0.08]"
           >
             <button
+              ref={whatsNewTabRef}
               id={whatsNewTabId}
               type="button"
               role="tab"
@@ -318,6 +411,7 @@ export function AboutModal({
             </button>
 
             <button
+              ref={changelogTabRef}
               id={changelogTabId}
               type="button"
               role="tab"

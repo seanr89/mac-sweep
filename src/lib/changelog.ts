@@ -23,6 +23,8 @@ const TRAILING_COMMIT_LINK_RE =
   /\s*\(\[[0-9a-f]{7,40}\]\([^)]+\)\)\s*$/i;
 const TRAILING_PR_LINK_RE =
   /\s*\(\[#\d+\]\([^)]+\)\)(?=\s*$|\s*\(\[[0-9a-f]{7,40}\])/i;
+const TRAILING_CLOSES_RE =
+  /,?\s*closes\s+(?:(?:\[#\d+\]\([^)]+\)|#\d+)(?:[,\s]+)?)+$/i;
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, "");
@@ -30,10 +32,14 @@ function normalizeVersion(version: string): string {
 
 function cleanBulletItem(raw: string): string {
   let cleaned = raw.trim();
-  cleaned = cleaned.replace(TRAILING_COMMIT_LINK_RE, "");
-  cleaned = cleaned.replace(TRAILING_PR_LINK_RE, "");
-  cleaned = cleaned.replace(TRAILING_COMMIT_LINK_RE, "");
-  return cleaned.trim();
+  let prev: string;
+  do {
+    prev = cleaned;
+    cleaned = cleaned.replace(TRAILING_CLOSES_RE, "").trim();
+    cleaned = cleaned.replace(TRAILING_COMMIT_LINK_RE, "").trim();
+    cleaned = cleaned.replace(TRAILING_PR_LINK_RE, "").trim();
+  } while (cleaned !== prev);
+  return cleaned;
 }
 
 /**
