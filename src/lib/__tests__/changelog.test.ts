@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import releaseManifest from "../../../.release-please-manifest.json";
 import packageJson from "../../../package.json";
+import rawCargoLock from "../../../src-tauri/Cargo.lock?raw";
 import rawCargoToml from "../../../src-tauri/Cargo.toml?raw";
 import tauriConf from "../../../src-tauri/tauri.conf.json";
 import {
@@ -126,15 +127,38 @@ describe("changelog parser", () => {
     expect(current?.sections.length).toBeGreaterThan(0);
   });
 
-  it("keeps versions synchronized across package.json, tauri.conf.json, Cargo.toml, and release-please manifest", () => {
+  it("strips trailing closes [#N](url) issue references from release-please bullets", () => {
+    const md = `## [0.1.1](https://github.com/seanr89/mac-sweep/compare/v0.1.0...v0.1.1) (2026-11-27)
+
+### Bug Fixes
+
+* **cleanup:** use NSFileManager.trashItemAtURL and handle iCloud dataless trash failures ([9e4c0f7](https://github.com/seanr89/mac-sweep/commit/9e4c0f77ebce116a5f518523b87c1c380e076034)), closes [#1](https://github.com/seanr89/mac-sweep/issues/1)
+* **ui:** polish modal focus ([abc1234](https://github.com/seanr89/mac-sweep/commit/abc1234)), closes [#3](https://github.com/seanr89/mac-sweep/issues/3), [#4](https://github.com/seanr89/mac-sweep/issues/4)
+`;
+
+    const entries = parseChangelog(md);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.sections[0]?.items).toEqual([
+      "**cleanup:** use NSFileManager.trashItemAtURL and handle iCloud dataless trash failures",
+      "**ui:** polish modal focus",
+    ]);
+  });
+
+  it("keeps versions synchronized across package.json, tauri.conf.json, Cargo.toml, Cargo.lock, and release-please manifest", () => {
     const cargoVersionMatch = rawCargoToml.match(
       /^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
     );
     const cargoVersion = cargoVersionMatch?.[1];
+    const cargoLockMatch = rawCargoLock.match(
+      /\[\[package\]\]\r?\nname = "mac-sweep"\r?\nversion = "([^"]+)"/,
+    );
+    const cargoLockVersion = cargoLockMatch?.[1];
 
     expect(cargoVersion).toBeDefined();
+    expect(cargoLockVersion).toBeDefined();
     expect(packageJson.version).toBe(tauriConf.version);
     expect(packageJson.version).toBe(cargoVersion);
+    expect(packageJson.version).toBe(cargoLockVersion);
     expect(packageJson.version).toBe(releaseManifest["."]);
   });
 });

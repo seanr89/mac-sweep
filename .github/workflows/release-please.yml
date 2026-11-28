@@ -15,6 +15,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout release PR branch
+        if: ${{ steps.release.outputs.pr != '' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync src-tauri/Cargo.lock version
+        if: ${{ steps.release.outputs.pr != '' }}
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          cargo_toml = pathlib.Path("src-tauri/Cargo.toml").read_text(encoding="utf-8")
+          toml_match = re.search(
+              r'^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"',
+              cargo_toml,
+              flags=re.MULTILINE,
+          )
+          assert toml_match, "Could not find [package] version in src-tauri/Cargo.toml"
+          target_version = toml_match.group(1)
+
+          lock_path = pathlib.Path("src-tauri/Cargo.lock")
+          lock_text = lock_path.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r'(\[\[package\]\]\nname = "mac-sweep"\nversion = ")([^"]+)(")'
+          )
+          updated, count = pattern.subn(rf'\g<1>{target_version}\g<3>', lock_text)
+          assert count == 1, f"Expected 1 mac-sweep stanza in src-tauri/Cargo.lock, found {count}"
+          if updated != lock_text:
+              lock_path.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Commit Cargo.lock sync if changed
+        if: ${{ steps.release.outputs.pr != '' }}
+        run: |
+          if ! git diff --quiet src-tauri/Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src-tauri/Cargo.lock
+            git commit -m "chore: sync src-tauri/Cargo.lock version"
+            git push
+          fi

@@ -2,9 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "node",
   "changelog-path": "CHANGELOG.md",
+  "bootstrap-sha": "13b8b5fd797923496366192bf572f63f3bc6788c",
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
-  "bump-patch-for-minor-pre-major": true,
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug Fixes" },
